@@ -9,7 +9,10 @@ import java.io.File;
 import java.io.FileReader;
 import java.util.StringTokenizer;
 import java.util.Set;
+import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.Path;
@@ -42,7 +45,7 @@ public class TopkCommonWords {
       @Override
       protected void setup(Context context) throws IOException, InterruptedException {
         String filename = context.getConfiguration().get("stop words");
-        File f = new File(path);
+        File f = new File(filename);
         BufferedReader buf = new BufferedReader(new FileReader(f));
         
         listOfStopWords = new HashSet<>();
@@ -77,14 +80,11 @@ public class TopkCommonWords {
 
     public static class DocWordCountReducer
          extends Reducer<Text, IntWritable, IntWritable, Text> {
-      private Integer res;
-      private Map<Integer, Text> orderedResult;
       /* Stores the frequency of common word */
       private Map<String, Integer> wordCountMap; 
 
       @Override
       protected void setup(Context context) {
-        orderedResult = new TreeMap<>();
         wordCountMap = new HashMap<>();
       }
 
@@ -93,7 +93,7 @@ public class TopkCommonWords {
                     ) throws IOException, InterruptedException {
         int s1 = 0;
         int s2 = 0;
-        int count = wordCountMap.getOrDefault(key.toString(), 0); 
+        int frequency = wordCountMap.getOrDefault(key.toString(), 0); 
         boolean existsInFirst = false;
         boolean existsInSecond = false;
 
@@ -107,21 +107,67 @@ public class TopkCommonWords {
           }
         }
 
-        count += Math.min(s1, s2);
+        frequency += Math.min(s1, s2);
 
-        // Is the word a common word?
-        if (existsInFirst && existsInSecond) {
-          /**
-           * Reduce will only be called once for each key. In other words,
-           * the frequency of the word will be
-           * */
+        // Is the word a common word and longer than 4 characters?
+        if (existsInFirst && existsInSecond && key.toString().length() > 4) {
+          wordCountMap.put(key.toString(), frequency);
         } 
       }
 
+      /**
+       * Output the top k common words. This method will be more efficient as opposed to using a tree map
+       * and creating an arraylist for every frequency if all the words' frequency can be stored in the cache.
+       * @param context
+       * @throws IOException
+       * @throws InterruptedException
+       */
+      @Override
+      protected void cleanup(Context context) throws IOException, InterruptedException {
+        // Sort the map by value and make sure that if they have the same value,
+        // the key is sorted in lexicographical order.
+        List<Map.Entry<String, Integer>> list = new ArrayList<>(wordCountMap.entrySet());
+
+        list.sort((o1, o2) -> {
+          if (o1.getValue() == o2.getValue()) {
+            return o1.getKey().compareTo(o2.getKey());
+          } else {
+            return o2.getValue() - o1.getValue();
+          }
+        });
+                
+        // Get the top k common words
+        int k = context.getConfiguration().getInt("k", 0);
+        for (int i = 0; i < k; i++) {
+          Map.Entry<String, Integer> entry = list.get(i);
+          context.write(new IntWritable(entry.getValue()), new Text(entry.getKey()));
+        }
+      }
     }
     
 
-    public static void main(String[] args){
+    public static void main(String[] args) throws Exception {
+      // Input format: <input file 1> <input file 2> <output directory> <stop words file> <k>
+      Path stopWords = new Path(args[3]);
+      int k = Integer.parseInt(args[4]);
 
+      Configuration conf = new Configuration();
+      conf.set("stop words", stopWords.toString());
+      conf.setInt("k", k);
+
+      Job job = Job.getInstance(conf, "Top k common words");
+      job.setJarByClass(TopkCommonWords.class);
+      job.setMapperClass(DualTokenMapper.class);
+      job.setReducerClass(DocWordCountReducer.class);
+      job.setMapOutputKeyClass(Text.class);
+      job.setMapOutputValueClass(IntWritable.class);
+      job.setOutputKeyClass(IntWritable.class);
+      job.setOutputValueClass(Text.class);
+      
+      FileInputFormat.addInputPath(job, new Path(args[0]));
+      FileInputFormat.addInputPath(job, new Path(args[1]));
+
+      FileOutputFormat.addOutputPath(job, new Path(args[2]));
+      System.exit(job.waitForCompletion(true) ? 0 : 1);
     } 
 }
