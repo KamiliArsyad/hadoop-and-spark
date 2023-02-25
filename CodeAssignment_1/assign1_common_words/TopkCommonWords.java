@@ -13,6 +13,7 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.HashMap;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.Path;
@@ -22,8 +23,8 @@ import org.apache.hadoop.mapreduce.Job;
 import org.apache.hadoop.mapreduce.Mapper;
 import org.apache.hadoop.mapreduce.Reducer;
 import org.apache.hadoop.mapreduce.lib.input.FileInputFormat;
+import org.apache.hadoop.mapreduce.lib.input.FileSplit;
 import org.apache.hadoop.mapreduce.lib.output.FileOutputFormat;
-import org.apache.hadoop.mapreduce.lib.output.FileSplit;
 
 
 public class TopkCommonWords {
@@ -37,7 +38,7 @@ public class TopkCommonWords {
     public static class DualTokenMapper
         extends Mapper<Object, Text, Text, IntWritable> {
 
-      private final static String FIRST_FILE = "task1-input1.txt";
+      private final static String FIRST_FILE = "Task1-input1.txt";
       private IntWritable document = new IntWritable(); // 1 for document 1, 2 for doc 2
       private Text word = new Text();
       private Set<String> listOfStopWords;
@@ -61,10 +62,8 @@ public class TopkCommonWords {
       public void map(Object key, Text val, Context context
           ) throws IOException, InterruptedException {
         StringTokenizer itr = new StringTokenizer(val.toString());
-        document.set(
-            ((FileSplit) context.getInputSplit())
-              .getPath()
-              .getName() == FIRST_FILE ? 1 : 2);
+        String name = ((FileSplit) context.getInputSplit()).getPath().getName();
+        document.set(name.contains("input1") ? 1 : 2);
         while (itr.hasMoreTokens()) {
           /**
            * Making sure that the next word is not a stop word.
@@ -111,6 +110,7 @@ public class TopkCommonWords {
 
         // Is the word a common word and longer than 4 characters?
         if (existsInFirst && existsInSecond && key.toString().length() > 4) {
+          // context.write(new IntWritable(frequency), key);
           wordCountMap.put(key.toString(), frequency);
         } 
       }
@@ -127,18 +127,13 @@ public class TopkCommonWords {
         // Sort the map by value and make sure that if they have the same value,
         // the key is sorted in lexicographical order.
         List<Map.Entry<String, Integer>> list = new ArrayList<>(wordCountMap.entrySet());
-
-        list.sort((o1, o2) -> {
-          if (o1.getValue() == o2.getValue()) {
-            return o1.getKey().compareTo(o2.getKey());
-          } else {
-            return o2.getValue() - o1.getValue();
-          }
-        });
+        list.sort((o1, o2) -> o1.getValue() == o2.getValue() 
+                    ? o1.getKey().compareTo(o2.getKey()) 
+                    : o2.getValue() - o1.getValue());
                 
         // Get the top k common words
         int k = context.getConfiguration().getInt("k", 0);
-        for (int i = 0; i < k; i++) {
+        for (int i = 0; i < k && i < list.size(); i++) {
           Map.Entry<String, Integer> entry = list.get(i);
           context.write(new IntWritable(entry.getValue()), new Text(entry.getKey()));
         }
@@ -147,8 +142,8 @@ public class TopkCommonWords {
     
 
     public static void main(String[] args) throws Exception {
-      // Input format: <input file 1> <input file 2> <output directory> <stop words file> <k>
-      Path stopWords = new Path(args[3]);
+      // Input format: <input file 1> <input file 2> <stop words> <output> <k>
+      Path stopWords = new Path(args[2]);
       int k = Integer.parseInt(args[4]);
 
       Configuration conf = new Configuration();
@@ -167,7 +162,7 @@ public class TopkCommonWords {
       FileInputFormat.addInputPath(job, new Path(args[0]));
       FileInputFormat.addInputPath(job, new Path(args[1]));
 
-      FileOutputFormat.addOutputPath(job, new Path(args[2]));
+      FileOutputFormat.setOutputPath(job, new Path(args[3]));
       System.exit(job.waitForCompletion(true) ? 0 : 1);
     } 
 }
