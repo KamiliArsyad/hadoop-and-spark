@@ -24,6 +24,13 @@ import org.apache.hadoop.mapreduce.lib.output.FileSplit;
 
 
 public class TopkCommonWords {
+
+    /**
+     * This mapper takes in a document, tokenize it, and returns the key-value pair
+     * <word, document> where document is the document ID (either one or two).
+     *
+     * The output will be processed by the reducer.
+     * */
     public static class DualTokenMapper
         extends Mapper<Object, Text, Text, IntWritable> {
 
@@ -67,6 +74,52 @@ public class TopkCommonWords {
         }
       }
     }
+
+    public static class DocWordCountReducer
+         extends Reducer<Text, IntWritable, IntWritable, Text> {
+      private Integer res;
+      private Map<Integer, Text> orderedResult;
+      /* Stores the frequency of common word */
+      private Map<String, Integer> wordCountMap; 
+
+      @Override
+      protected void setup(Context context) {
+        orderedResult = new TreeMap<>();
+        wordCountMap = new HashMap<>();
+      }
+
+      @Override
+      public void reduce(Text key, Iterable<IntWritable> documents, Context context
+                    ) throws IOException, InterruptedException {
+        int s1 = 0;
+        int s2 = 0;
+        int count = wordCountMap.getOrDefault(key.toString(), 0); 
+        boolean existsInFirst = false;
+        boolean existsInSecond = false;
+
+        for (IntWritable document : documents) {
+          if (document.get() == 1) {
+            existsInFirst = true;
+            s1 += 1;
+          } else {
+            existsInSecond = true;
+            s2 += 1;
+          }
+        }
+
+        count += Math.min(s1, s2);
+
+        // Is the word a common word?
+        if (existsInFirst && existsInSecond) {
+          /**
+           * Reduce will only be called once for each key. In other words,
+           * the frequency of the word will be
+           * */
+        } 
+      }
+
+    }
+    
 
     public static void main(String[] args){
 
