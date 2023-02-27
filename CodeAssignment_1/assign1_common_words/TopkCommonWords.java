@@ -38,13 +38,14 @@ public class TopkCommonWords {
     public static class DualTokenMapper
         extends Mapper<Object, Text, Text, IntWritable> {
 
-      private final static String FIRST_FILE = "Task1-input1.txt";
+      private static String FIRST_FILE;
       private IntWritable document = new IntWritable(); // 1 for document 1, 2 for doc 2
       private Text word = new Text();
       private Set<String> listOfStopWords;
 
       @Override
       protected void setup(Context context) throws IOException, InterruptedException {
+        FIRST_FILE = context.getConfiguration().get("file1");
         String filename = context.getConfiguration().get("stop words");
         File f = new File(filename);
         BufferedReader buf = new BufferedReader(new FileReader(f));
@@ -63,7 +64,7 @@ public class TopkCommonWords {
           ) throws IOException, InterruptedException {
         StringTokenizer itr = new StringTokenizer(val.toString());
         String name = ((FileSplit) context.getInputSplit()).getPath().getName();
-        document.set(name.contains("input1") ? 1 : 2);
+        document.set(name.contains(FIRST_FILE) ? 1 : 2);
         while (itr.hasMoreTokens()) {
           /**
            * Making sure that the next word is not a stop word.
@@ -144,11 +145,19 @@ public class TopkCommonWords {
     public static void main(String[] args) throws Exception {
       // Input format: <input file 1> <input file 2> <stop words> <output> <k>
       Path stopWords = new Path(args[2]);
+      Path input1 = new Path(args[0]);
+      Path input2 = new Path(args[1]);
+
       int k = Integer.parseInt(args[4]);
 
       Configuration conf = new Configuration();
       conf.set("stop words", stopWords.toString());
+      conf.set("file1", input1.toString());
+      conf.set("file2", input2.toString());
       conf.setInt("k", k);
+
+      FileInputFormat.addInputPath(job, input1);
+      FileInputFormat.addInputPath(job, input2);
 
       Job job = Job.getInstance(conf, "Top k common words");
       job.setJarByClass(TopkCommonWords.class);
@@ -158,9 +167,6 @@ public class TopkCommonWords {
       job.setMapOutputValueClass(IntWritable.class);
       job.setOutputKeyClass(IntWritable.class);
       job.setOutputValueClass(Text.class);
-      
-      FileInputFormat.addInputPath(job, new Path(args[0]));
-      FileInputFormat.addInputPath(job, new Path(args[1]));
 
       FileOutputFormat.setOutputPath(job, new Path(args[3]));
       System.exit(job.waitForCompletion(true) ? 0 : 1);
